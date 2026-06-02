@@ -1,0 +1,17 @@
+ingestion:
+  folder: "docs/"                   # folder to scan (relative to project root)
+  supported_extensions: [".pdf", ".txt", ".md"]
+  chunk_size: 800                   # approximate tokens per chunk (measured in words)
+  chunk_overlap: 150                # overlap in words between adjacent chunks
+
+embedding:
+  provider: "sentence_transformers" # only supported provider; Claude API is not used here
+  model: "all-MiniLM-L6-v2"        # fast, local, no API cost; ~384-dim vectors
+
+retrieval:
+  top_k: 6                          # number of chunks returned per query
+
+qa:
+  model: "claude-sonnet-4-6"
+  api_key_env: "ANTHROPIC_API_KEY"  # name of the env var holding your Anthropic key
+  max_tokens: 2048
