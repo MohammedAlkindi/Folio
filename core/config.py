@@ -49,6 +49,12 @@ class Config:
     def qa_max_tokens(self) -> int:
         return int(self._data["qa"].get("max_tokens", 2048))
 
+    # ── workspace ────────────────────────────────────────────────────────────
+
+    def workspace(self) -> str:
+        # Assumption: top-level "workspace" key in config; falls back to "default".
+        return str(self._data.get("workspace", "default"))
+
 
 def load_config(path: str | Path) -> Config:
     config_path = Path(path)

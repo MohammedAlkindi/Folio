@@ -1,0 +1,56 @@
+The quick brown fox jumps over the lazy dog. This pangram contains every letter of the
+English alphabet at least once. Pangrams are often used to display typefaces or test
+keyboards and other equipment. The sentence has been used since at least the late
+nineteenth century and is still widely recognized today.
+
+Language is a structured system of communication that consists of grammar and vocabulary.
+It is the primary means by which humans convey meaning, both through spoken and written
+forms. Every human culture that has ever been studied has been found to have a fully
+developed language. Some estimates suggest there are between six and seven thousand
+languages currently spoken around the world.
+
+The history of writing spans more than five thousand years. The earliest known writing
+system is cuneiform, developed by the Sumerians of ancient Mesopotamia around 3400 BCE.
+Hieroglyphic writing in ancient Egypt followed shortly after. These early scripts began
+as pictographic systems and gradually became more abstract over time.
+
+A document is a written, drawn, presented, or memorialized representation of thought.
+Originating from the Latin Documentum meaning lesson or proof, it is closely related
+to the Latin verb Docere which means to teach. In the past, the word was usually
+used to denote a written proof useful as evidence of a truth or fact.
+
+Information retrieval is the activity of obtaining information system resources that
+are relevant to an information need from a collection of those resources. Searches can
+be based on full-text or other content-based indexing. Information retrieval is the
+science of searching for information in a document, searching for documents themselves,
+and also searching for the metadata that describes data, and for databases of texts,
+images or sounds.
+
+Natural language processing is a subfield of linguistics, computer science, and artificial
+intelligence concerned with the interactions between computers and human language, in
+particular how to program computers to process and analyze large amounts of natural
+language data. The goal is a computer capable of understanding the contents of documents,
+including the contextual nuances of the language within them.
+
+Machine learning is a method of data analysis that automates analytical model building.
+It is based on the idea that systems can learn from data, identify patterns and make
+decisions with minimal human intervention. Machine learning algorithms are trained on
+datasets to find patterns and make predictions, improving accuracy over time as they
+process more data.
+
+Embedding is a relatively low-dimensional space into which you can translate
+high-dimensional vectors. Embeddings make it easier to do machine learning on large
+inputs like sparse vectors representing words. An embedding captures some of the
+semantics of the input by placing semantically similar inputs close together in the
+embedding space.
+
+Vector databases are purpose-built to handle the unique structure of vector embeddings.
+They index vectors for fast retrieval and can find similar vectors efficiently using
+approximate nearest neighbor algorithms. These databases are increasingly important for
+applications that use large language models, since they enable fast semantic search
+across large collections of documents.
+
+Chunking is the process of breaking large documents into smaller pieces for indexing.
+The optimal chunk size depends on the use case and the embedding model being used.
+Smaller chunks allow for more precise retrieval but may lose context. Larger chunks
+preserve context but reduce precision. Overlapping chunks help bridge boundaries.

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-# Assumption: this file lives at folio/core/paths.py, so ROOT is two levels up.
-ROOT: Path = Path(__file__).resolve().parent.parent.parent
+# Assumption: this file lives at <project_root>/core/paths.py, so ROOT is one level up.
+ROOT: Path = Path(__file__).resolve().parent.parent
 
 DATA_DIR: Path = ROOT / "data"
 LOGS_DIR: Path = ROOT / "logs"

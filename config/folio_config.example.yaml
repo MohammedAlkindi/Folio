@@ -1,3 +1,5 @@
+workspace: "default"               # named workspace — use different values to separate projects
+
 ingestion:
   folder: "docs/"                   # folder to scan (relative to project root)
   supported_extensions: [".pdf", ".txt", ".md"]

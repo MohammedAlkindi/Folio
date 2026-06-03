@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from folio.core.paths import MANIFEST_PATH, ensure_dirs
+from core.paths import MANIFEST_PATH, ensure_dirs
 
 logger = logging.getLogger(__name__)
 

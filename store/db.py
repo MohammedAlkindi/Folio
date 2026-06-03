@@ -4,8 +4,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator
 
-from folio.core.paths import DB_PATH, ensure_dirs
-from folio.store.models import Chunk, Document
+from core.paths import DB_PATH, ensure_dirs
+from store.models import Chunk, Document
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,28 @@ def _conn() -> Generator[sqlite3.Connection, None, None]:
         raise
     finally:
         con.close()
+
+
+def _conn_at(db_path) -> Generator[sqlite3.Connection, None, None]:
+    """Context manager for a connection to an arbitrary path — used by tests."""
+    import sqlite3 as _sqlite3
+    from contextlib import contextmanager as _cm
+
+    @_cm
+    def _inner():
+        con = _sqlite3.connect(str(db_path), check_same_thread=False)
+        con.execute("PRAGMA journal_mode=WAL;")
+        con.row_factory = _sqlite3.Row
+        try:
+            yield con
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+
+    return _inner()
 
 
 def init_db() -> None:
@@ -123,6 +145,17 @@ def get_document(doc_id: str) -> Document | None:
     with _conn() as con:
         row = con.execute(
             "SELECT * FROM documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return Document(**dict(row))
+
+
+def get_document_by_filename(filename: str) -> Document | None:
+    """Look up the first document matching the given filename."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM documents WHERE filename = ? LIMIT 1", (filename,)
         ).fetchone()
     if row is None:
         return None

@@ -1,162 +1,183 @@
 # Folio
 
-Folio is a local document intelligence pipeline. It ingests a folder of PDFs and text files,
-chunks and embeds them using a local model, and lets you query across the entire corpus with
-answers that include traceable citations to the source document and page number. Nothing leaves
-your machine — no cloud storage, no remote embeddings.
+**Search your own documents the way you search the web — with answers, not just keywords.**
+
+---
+
+## The problem
+
+You have a folder of PDFs, research papers, contracts, or notes. You need to find
+something specific. Ctrl+F only works if you know the exact words. Uploading to
+ChatGPT means your documents leave your machine, get chunked by someone else's
+pipeline, and disappear into a black box you can't audit or extend.
+
+Folio runs entirely on your hardware. It builds a local semantic index, retrieves
+the most relevant passages for any question you ask, and generates a cited answer
+using Claude — every claim traceable to a specific document and page number.
+
+---
+
+## Quick demo
+
+```
+$ python -m cli.main ingest --config config/folio_config.yaml
+  Ingesting  q3_report.pdf...      OK (187 chunks)
+  Ingesting  board_minutes.pdf...  OK (94 chunks)
+  Ingesting  notes.md...           OK (14 chunks)
+
+Workspace: default
+Scanned:        3 files
+Ingested:       3 new
+Skipped:        0 (already indexed)
+Failed:         0
+Chunks:       295 total
+
+$ python -m cli.main query --config config/folio_config.yaml
+Folio — ask questions about your documents. Type 'quit' to exit.
+
+> What revenue targets were approved in the board meeting?
+
+The board approved a Q4 revenue target of $2.4M, representing a 12% increase
+over Q3 actuals. The motion passed unanimously. (Source: board_minutes.pdf, p.3)
+
+Sources: board_minutes.pdf (p.3), q3_report.pdf (p.1)
+Confidence: high
+
+Show excerpts? [y/N] y
+
+--- [1] board_minutes.pdf (p.3) ---
+...the motion to approve Q4 targets of $2.4M was put to a vote. All five
+board members voted in favour. The CFO noted this assumes the enterprise
+pipeline closes on schedule...
+
+--- [2] q3_report.pdf (p.1) ---
+Q3 closed at $2.14M against a target of $2.1M. Management proposes a 12%
+stretch target for Q4 based on current pipeline visibility...
+```
+
+---
+
+## Why Folio
+
+- **Nothing leaves your machine.** Embeddings are computed locally using
+  sentence-transformers. Only your Claude API call touches the network, and only
+  at query time — your documents never do.
+
+- **Every answer is auditable.** Claude is forced via tool-use to return a
+  structured `{answer, sources, confidence}` response. The CLI prints inline
+  citations, a source list, a confidence label, and on request the raw chunk text
+  that grounded the answer.
+
+- **Honest about uncertainty.** When the corpus doesn't have strong evidence,
+  Folio says so before answering, rather than generating a confident-sounding
+  hallucination. Low-confidence answers come with a prompt to ingest more.
 
 ---
 
 ## Setup
 
 ```bash
-# 1. Clone and enter the repo
-git clone https://github.com/yourname/folio.git
-cd folio
+# 1. Clone
+git clone https://github.com/yourname/folio.git && cd folio
 
-# 2. Create a virtual environment
+# 2. Virtual environment
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# 3. Install dependencies
+# 3. Install
 pip install -r requirements.txt
 
-# 4. Copy the example config and adjust paths
+# 4. Config
 cp config/folio_config.example.yaml config/folio_config.yaml
-# Edit config/folio_config.yaml — at minimum set ingestion.folder
+# Edit config/folio_config.yaml — set ingestion.folder and optionally workspace
 
-# 5. Set your Anthropic API key (only needed for the query command)
+# 5. API key (query command only — ingest works without it)
 export ANTHROPIC_API_KEY="sk-ant-..."
+
+# 6. Drop documents into your configured folder and ingest
+python -m cli.main ingest --config config/folio_config.yaml
 ```
 
 ---
 
-## Ingest a folder
+## Commands
 
-```bash
-python -m folio.cli.main ingest --config config/folio_config.yaml
-```
+| Command | What it does |
+|---------|-------------|
+| `python -m cli.main ingest` | Scan folder, chunk, embed, store. Idempotent. |
+| `python -m cli.main query` | Interactive Q&A loop with citations. |
+| `python -m cli.main list` | Print a table of all indexed documents. |
+| `python -m cli.main remove <filename>` | Delete a document from SQLite and ChromaDB. |
+| `python -m cli.main reindex <filename>` | Remove and re-ingest a document in one step. |
+| `python -m cli.main workspace list` | List all workspaces with chunk counts. |
 
-Or, if you add a `[project.scripts]` entry in `pyproject.toml`:
-
-```bash
-folio ingest --config config/folio_config.yaml
-```
-
-Sample output:
-
-```
-Scanned:       42 files
-Ingested:      38 new
-Skipped:        4 (already indexed)
-Failed:         0
-Chunks:     1,847 total
-```
-
-Ingestion is **idempotent** — re-running on the same folder produces 0 new, N skipped.
-
----
-
-## Query
-
-```bash
-python -m folio.cli.main query --config config/folio_config.yaml
-```
-
-You will enter an interactive prompt:
-
-```
-Folio — ask questions about your documents. Type 'quit' to exit.
-
-> What were the key findings in the Q3 report?
-
-The Q3 report highlights a 12% revenue increase driven by...
-(Source: q3_report.pdf, p.4)
-
-Sources: q3_report.pdf (p.4), executive_summary.pdf (p.1)
-Confidence: high
-```
-
-Type `quit` or press `Ctrl+C` to exit.
-
----
-
-## List ingested documents
-
-```bash
-python -m folio.cli.main list --config config/folio_config.yaml
-```
-
-```
-Filename                                  Pages   Chunks  Ingested
----------------------------------------- ------  ------- ----------
-q3_report.pdf                                24      187  2026-06-01
-notes.md                                      —       14  2026-06-01
-```
-
----
-
-## Supported file types
-
-| Extension | How it is parsed |
-|-----------|-----------------|
-| `.pdf`    | Page-by-page text extraction via pypdf. Pages with no text layer are skipped. |
-| `.txt`    | Full file read as UTF-8 (invalid bytes replaced). |
-| `.md`     | Same as `.txt` — Markdown syntax is preserved as-is in chunks. |
-
-**OCR is out of scope.** Scanned PDFs with no embedded text layer will produce no chunks and be
-logged as skipped.
-
----
-
-## What is never stored
-
-- Raw binary content or PDF byte streams — only extracted plain text.
-- Embeddings are stored in ChromaDB; text is stored alongside them as document metadata.
-- No data is sent to external services except your Anthropic API key at query time.
+All commands accept `--config <path>` (default: `config/folio_config.yaml`).
 
 ---
 
 ## How citations work
 
-Every chunk carries the filename and 1-indexed page number from its source PDF page (or `None`
-for plain-text files). Claude is instructed to cite every factual claim using
-`(Source: filename, p.N)` inline, and also returns a structured `sources` list. The CLI prints
-both. Page numbers match the PDF's own page numbering because pypdf returns pages in order
-starting from page 1.
+Every chunk carries the filename and 1-indexed page number from its source PDF (or
+`None` for plain-text files). When you run a query, Folio retrieves the top-k most
+semantically similar chunks, then sends them to Claude with a strict instruction:
+cite every claim using `(Source: filename, p.N)` inline, and return a structured
+`sources` list alongside a `confidence` rating.
+
+Claude is called with `tool_choice: forced` — it cannot respond without filling the
+structured schema. If Claude rates confidence as `insufficient_data`, Folio warns you
+before showing the answer. Type `y` at the excerpt prompt to see the raw passage each
+source claim is drawn from.
+
+Page numbers match the PDF's own numbering because pypdf returns pages in order
+starting from 1.
 
 ---
 
-## Adding new files / re-ingesting
+## Workspaces
 
-Drop new files into your configured `ingestion.folder` and run `folio ingest` again. Folio
-computes a stable SHA-256 ID from each file's absolute path. Only files that are new (ID not
-yet in the database) are processed. Already-indexed files are reported as skipped.
+Keep separate indexes for separate projects without running multiple instances:
 
-To force a full re-index of a file, delete its record from `data/folio.db` and its vectors
-from `data/chroma/`, then run ingest again.
+```yaml
+# config/research.yaml
+workspace: "research"
 
----
+# config/work.yaml
+workspace: "work"
+```
 
-## Audit trail
-
-Every ingestion and query is appended to `logs/manifest.jsonl` as a JSON line with a UTC
-timestamp. This file is the human-readable record of what Folio has processed. It is never
-truncated — append-only.
-
----
-
-## Project layout
+Each workspace maps to its own ChromaDB collection (`folio_research`, `folio_work`).
+Ingest and query against whichever config you pass. List all workspaces:
 
 ```
-folio/
-├── cli/            CLI entry point (ingest, query, list)
-├── core/           Config, paths, retry, manifest
-├── ingestion/      Scanner, parser, chunker, embedder
-├── store/          SQLite (db.py) + ChromaDB (vector.py) + dataclasses (models.py)
-├── retrieval/      Embed query → ChromaDB search
-├── qa/             Claude tool-use Q&A with structured citations
-config/
-data/               gitignored — SQLite + ChromaDB live here
-logs/               gitignored — manifest.jsonl lives here
+$ python -m cli.main workspace list
+Workspace                      Collection                          Chunks
+------------------------------ ----------------------------------- -------
+default                        folio_default                          295
+research                       folio_research                        1847
+work                           folio_work                             512
 ```
+
+---
+
+## Running tests
+
+```bash
+pytest tests/ -v
+pytest tests/ --cov=. --cov-report=term-missing
+```
+
+Tests use temporary SQLite databases and real fixture files. No test touches
+`data/folio.db`. No mocking of file I/O.
+
+---
+
+## Roadmap
+
+- **PDF table extraction** — structured data in tables is currently treated as
+  raw text; a dedicated table parser would improve answer quality on financial docs.
+- **Incremental re-index on file change** — detect modified files by content hash
+  and auto-reindex without a manual `folio reindex` call.
+- **Multi-file semantic diff** — given two versions of a document, show what changed
+  in meaning rather than just line diffs.
+- **Local LLM support** — swap Claude for a locally-served Ollama model for fully
+  air-gapped operation.

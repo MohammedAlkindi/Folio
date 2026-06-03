@@ -2,8 +2,8 @@ import json
 import logging
 import os
 
-from folio.core.config import Config
-from folio.core.retry import with_retry
+from core.config import Config
+from core.retry import with_retry
 
 logger = logging.getLogger(__name__)
 

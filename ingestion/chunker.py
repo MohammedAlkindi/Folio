@@ -65,6 +65,10 @@ def chunk_pages(
             }
         )
 
+        # All words consumed — stop before generating tail overlap-only chunks.
+        if end >= total:
+            break
+
         next_start = end - overlap
         # Guarantee forward progress — avoid infinite loops on very short documents.
         if next_start <= start:
