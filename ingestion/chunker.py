@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +14,11 @@ def chunk_pages(
 ) -> list[dict]:
     """
     Split page texts into overlapping word-window chunks.
-    Returns list of {text, page_number, chunk_index}.
+    Returns list of {text, page_number, page_start, page_end, chunk_index}.
     chunk_size and overlap are in words (approximate token count).
-    page_number in each chunk is the page of the first word in that chunk.
+    page_number is the page containing the majority of words in the chunk;
+    ties are broken by taking the higher page number.
+    page_start/page_end are the pages of the first/last word (debug metadata).
     chunk_index is 0-based sequential across the document.
     """
     if not pages:
@@ -55,12 +58,19 @@ def chunk_pages(
 
         chunk_words = words[start:end]
         chunk_text = " ".join(chunk_words)
-        page_number = word_pages[start]
+        page_slice = word_pages[start:end]
+
+        counts = Counter(page_slice)
+        max_count = max(counts.values())
+        # Among pages tied for most words, pick the highest page number.
+        page_number = max(p for p, c in counts.items() if c == max_count)
 
         chunks.append(
             {
                 "text": chunk_text,
                 "page_number": page_number,
+                "page_start": word_pages[start],
+                "page_end": word_pages[end - 1],
                 "chunk_index": len(chunks),
             }
         )
