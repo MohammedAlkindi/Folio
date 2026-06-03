@@ -49,6 +49,9 @@ class Config:
     def qa_max_tokens(self) -> int:
         return int(self._data["qa"].get("max_tokens", 2048))
 
+    def qa_context_budget(self) -> int:
+        return int(self._data["qa"].get("context_budget", 3500))
+
     # ── workspace ────────────────────────────────────────────────────────────
 
     def workspace(self) -> str:

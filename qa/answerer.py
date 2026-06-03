@@ -83,6 +83,22 @@ def answer(
             "ANTHROPIC_API_KEY is not set. Export it before running queries."
         )
 
+    budget = cfg.qa_context_budget()
+    overhead = len(question.split()) + 100
+    working_chunks = list(chunks)
+    while len(working_chunks) > 1:
+        estimated = overhead + sum(len(c["text"].split()) for c in working_chunks)
+        if estimated <= budget:
+            break
+        working_chunks.pop()
+    dropped = len(chunks) - len(working_chunks)
+    if dropped:
+        logger.warning(
+            "Context trimmed: dropped %d chunk(s) to fit budget of %d words",
+            dropped,
+            budget,
+        )
+
     try:
         import anthropic  # noqa: PLC0415 — lazy import; only needed for query command
     except ImportError:
@@ -92,7 +108,7 @@ def answer(
 
     @with_retry(max_attempts=3, base_delay=2.0, label="Claude QA")
     def _call() -> dict:
-        user_message = _build_user_message(question, chunks)
+        user_message = _build_user_message(question, working_chunks)
         response = client.messages.create(
             model=cfg.qa_model(),
             max_tokens=cfg.qa_max_tokens(),

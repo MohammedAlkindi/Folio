@@ -17,3 +17,4 @@ qa:
   model: "claude-sonnet-4-6"
   api_key_env: "ANTHROPIC_API_KEY"  # name of the env var holding your Anthropic key
   max_tokens: 2048
+  context_budget: 3500              # max words sent as context; lowest-ranked chunks dropped first
