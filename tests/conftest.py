@@ -1,17 +1,11 @@
-"""Session-level fixtures and sys.path setup for the Folio test suite."""
-import sys
+"""Session-level fixtures for the Folio test suite."""
+# sys.path manipulation removed — project must be installed with pip install -e .
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-# Add project root to sys.path so that `from core.X`, `from store.X`, etc. resolve.
-# Assumption: conftest.py lives at <project_root>/tests/conftest.py.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from tests.fixtures.make_fixtures import generate_all  # noqa: E402 — after sys.path insert
+from tests.fixtures.make_fixtures import generate_all
 
 
 @pytest.fixture(scope="session", autouse=True)

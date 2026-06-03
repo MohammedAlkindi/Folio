@@ -20,7 +20,7 @@ using Claude — every claim traceable to a specific document and page number.
 ## Quick demo
 
 ```
-$ python -m cli.main ingest --config config/folio_config.yaml
+$ folio ingest --config config/folio_config.yaml
   Ingesting  q3_report.pdf...      OK (187 chunks)
   Ingesting  board_minutes.pdf...  OK (94 chunks)
   Ingesting  notes.md...           OK (14 chunks)
@@ -32,7 +32,7 @@ Skipped:        0 (already indexed)
 Failed:         0
 Chunks:       295 total
 
-$ python -m cli.main query --config config/folio_config.yaml
+$ folio query --config config/folio_config.yaml
 Folio — ask questions about your documents. Type 'quit' to exit.
 
 > What revenue targets were approved in the board meeting?
@@ -84,18 +84,21 @@ git clone https://github.com/yourname/folio.git && cd folio
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# 3. Install
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Config
+# 4. Install Folio as an editable package (registers the `folio` CLI)
+pip install -e .
+
+# 5. Config
 cp config/folio_config.example.yaml config/folio_config.yaml
 # Edit config/folio_config.yaml — set ingestion.folder and optionally workspace
 
-# 5. API key (query command only — ingest works without it)
+# 6. API key (query command only — ingest works without it)
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# 6. Drop documents into your configured folder and ingest
-python -m cli.main ingest --config config/folio_config.yaml
+# 7. Drop documents into your configured folder and ingest
+folio ingest --config config/folio_config.yaml
 ```
 
 ---
@@ -104,12 +107,12 @@ python -m cli.main ingest --config config/folio_config.yaml
 
 | Command | What it does |
 |---------|-------------|
-| `python -m cli.main ingest` | Scan folder, chunk, embed, store. Idempotent. |
-| `python -m cli.main query` | Interactive Q&A loop with citations. |
-| `python -m cli.main list` | Print a table of all indexed documents. |
-| `python -m cli.main remove <filename>` | Delete a document from SQLite and ChromaDB. |
-| `python -m cli.main reindex <filename>` | Remove and re-ingest a document in one step. |
-| `python -m cli.main workspace list` | List all workspaces with chunk counts. |
+| `folio ingest` | Scan folder, chunk, embed, store. Idempotent. |
+| `folio query` | Interactive Q&A loop with citations. |
+| `folio list` | Print a table of all indexed documents. |
+| `folio remove <filename>` | Delete a document from SQLite and ChromaDB. |
+| `folio reindex <filename>` | Remove and re-ingest a document in one step. |
+| `folio workspace list` | List all workspaces with chunk counts. |
 
 All commands accept `--config <path>` (default: `config/folio_config.yaml`).
 
@@ -149,7 +152,7 @@ Each workspace maps to its own ChromaDB collection (`folio_research`, `folio_wor
 Ingest and query against whichever config you pass. List all workspaces:
 
 ```
-$ python -m cli.main workspace list
+$ folio workspace list
 Workspace                      Collection                          Chunks
 ------------------------------ ----------------------------------- -------
 default                        folio_default                          295
