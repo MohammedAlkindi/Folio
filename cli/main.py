@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 from core.config import load_config
 from core.manifest import (
@@ -46,6 +48,121 @@ def cli() -> None:
     """Folio — local document intelligence pipeline."""
 
 
+# ── shared pipeline helper ────────────────────────────────────────────────────
+
+def _ingest_single_file(filepath: Path, cfg, model, workspace: str) -> tuple[int, str]:
+    """
+    Run the full ingest pipeline for one file.
+
+    If the file is already indexed it is deleted first (re-index path).
+    Returns (chunk_count, status) where status is one of:
+      "ingested" | "reindexed" | "failed"
+    """
+    fid = doc_id(filepath)
+    is_reindex = document_exists(fid)
+
+    if is_reindex:
+        delete_by_doc_id(fid, workspace=workspace)
+        delete_document(fid)
+
+    pages = parse(filepath)
+    if not pages:
+        file_skipped(str(filepath), "no extractable text")
+        logger.warning("FAIL  %s — no extractable text", filepath.name)
+        return (0, "failed")
+
+    raw_chunks = chunk_pages(pages, cfg.chunk_size(), cfg.chunk_overlap())
+    if not raw_chunks:
+        file_skipped(str(filepath), "chunking produced no output")
+        return (0, "failed")
+
+    chunk_objs: list[Chunk] = [
+        Chunk(
+            id=f"{fid}:chunk:{rc['chunk_index']}",
+            doc_id=fid,
+            filename=filepath.name,
+            page_number=rc["page_number"],
+            chunk_index=rc["chunk_index"],
+            text=rc["text"],
+            token_estimate=len(rc["text"].split()),
+        )
+        for rc in raw_chunks
+    ]
+
+    embeddings = embed_texts([c.text for c in chunk_objs], model)
+
+    page_numbers = [p["page_number"] for p in pages if p["page_number"] is not None]
+    page_count = max(page_numbers) if page_numbers else None
+
+    doc = Document(
+        id=fid,
+        filename=filepath.name,
+        filepath=str(filepath.resolve()),
+        extension=filepath.suffix.lower(),
+        page_count=page_count,
+        chunk_count=len(chunk_objs),
+        ingested_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    insert_document(doc)
+    for chunk in chunk_objs:
+        insert_chunk(chunk)
+    update_chunk_count(fid, len(chunk_objs))
+    upsert_chunks(chunk_objs, embeddings, workspace=workspace)
+
+    status = "reindexed" if is_reindex else "ingested"
+    file_ingested(str(filepath), len(chunk_objs), status)
+    return (len(chunk_objs), status)
+
+
+# ── watch event handler ───────────────────────────────────────────────────────
+
+class FolioEventHandler(FileSystemEventHandler):
+    """Watchdog handler that ingests or removes files as they change."""
+
+    def __init__(self, cfg, model, workspace: str, extensions: set) -> None:
+        super().__init__()
+        self._cfg = cfg
+        self._model = model
+        self._workspace = workspace
+        self._extensions = extensions
+
+    def _matches(self, path: str) -> bool:
+        return Path(path).suffix.lower() in self._extensions
+
+    def on_created(self, event) -> None:
+        if event.is_directory or not self._matches(event.src_path):
+            return
+        filepath = Path(event.src_path)
+        chunk_count, status = _ingest_single_file(filepath, self._cfg, self._model, self._workspace)
+        if status != "failed":
+            click.echo(f"  [+] Ingested {filepath.name} ({chunk_count} chunks)")
+        else:
+            click.echo(f"  [!] Failed to ingest {filepath.name}")
+
+    def on_modified(self, event) -> None:
+        if event.is_directory or not self._matches(event.src_path):
+            return
+        filepath = Path(event.src_path)
+        chunk_count, status = _ingest_single_file(filepath, self._cfg, self._model, self._workspace)
+        if status != "failed":
+            label = "Reindexed" if status == "reindexed" else "Ingested"
+            click.echo(f"  [+] {label} {filepath.name} ({chunk_count} chunks)")
+        else:
+            click.echo(f"  [!] Failed to ingest {filepath.name}")
+
+    def on_deleted(self, event) -> None:
+        if event.is_directory or not self._matches(event.src_path):
+            return
+        filepath = Path(event.src_path)
+        fid = doc_id(filepath)
+        if not document_exists(fid):
+            return
+        delete_by_doc_id(fid, workspace=self._workspace)
+        delete_document(fid)
+        click.echo(f"  [-] Removed {filepath.name}")
+
+
 # ── ingest ───────────────────────────────────────────────────────────────────
 
 @cli.command()
@@ -73,7 +190,6 @@ def ingest(config_path: str) -> None:
         click.echo(f"No supported files found in '{folder}'. Nothing to ingest.")
         return
 
-    # Load embedding model once for the whole batch.
     model = load_model(cfg.embedding_model())
 
     new_count = 0
@@ -92,65 +208,16 @@ def ingest(config_path: str) -> None:
 
         click.echo(f"  Ingesting  {filepath.name}...", nl=False)
 
-        pages = parse(filepath)
-        if not pages:
+        chunk_count, status = _ingest_single_file(filepath, cfg, model, workspace)
+
+        if status == "failed":
             failed_count += 1
-            file_skipped(str(filepath), "no extractable text")
-            logger.warning("FAIL  %s — no extractable text", filepath.name)
-            click.echo("  FAILED (no text)")
+            click.echo("  FAILED")
             continue
 
-        raw_chunks = chunk_pages(pages, cfg.chunk_size(), cfg.chunk_overlap())
-        if not raw_chunks:
-            failed_count += 1
-            file_skipped(str(filepath), "chunking produced no output")
-            click.echo("  FAILED (no chunks)")
-            continue
-
-        # Build Chunk objects.
-        chunk_objs: list[Chunk] = [
-            Chunk(
-                id=f"{fid}:chunk:{rc['chunk_index']}",
-                doc_id=fid,
-                filename=filepath.name,
-                page_number=rc["page_number"],
-                chunk_index=rc["chunk_index"],
-                text=rc["text"],
-                token_estimate=len(rc["text"].split()),
-            )
-            for rc in raw_chunks
-        ]
-
-        # Embed all chunks for this document.
-        embeddings = embed_texts([c.text for c in chunk_objs], model)
-
-        # Determine page count from PDF pages (None for txt/md).
-        page_numbers = [p["page_number"] for p in pages if p["page_number"] is not None]
-        page_count = max(page_numbers) if page_numbers else None
-
-        doc = Document(
-            id=fid,
-            filename=filepath.name,
-            filepath=str(filepath.resolve()),
-            extension=filepath.suffix.lower(),
-            page_count=page_count,
-            chunk_count=len(chunk_objs),
-            ingested_at=datetime.now(timezone.utc).isoformat(),
-        )
-
-        # Persist to SQLite.
-        insert_document(doc)
-        for chunk in chunk_objs:
-            insert_chunk(chunk)
-        update_chunk_count(fid, len(chunk_objs))
-
-        # Persist to ChromaDB under the configured workspace.
-        upsert_chunks(chunk_objs, embeddings, workspace=workspace)
-
-        total_chunks += len(chunk_objs)
+        total_chunks += chunk_count
         new_count += 1
-        file_ingested(str(filepath), len(chunk_objs), "ok")
-        click.echo(f"  OK ({len(chunk_objs)} chunks)")
+        click.echo(f"  OK ({chunk_count} chunks)")
 
     ingest_complete(new_count, total_chunks)
 
@@ -161,6 +228,43 @@ def ingest(config_path: str) -> None:
     click.echo(f"Skipped:   {skipped_count:>6} (already indexed)")
     click.echo(f"Failed:    {failed_count:>6}")
     click.echo(f"Chunks:    {total_chunks:>6,} total")
+
+
+# ── watch ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option(
+    "--config",
+    "config_path",
+    default="config/folio_config.yaml",
+    show_default=True,
+    help="Path to YAML config file.",
+)
+def watch(config_path: str) -> None:
+    """Monitor the ingestion folder and auto-ingest files on change."""
+    cfg = load_config(config_path)
+    ensure_dirs()
+    init_db()
+
+    folder = cfg.ingestion_folder()
+    extensions = {ext.lower() for ext in cfg.supported_extensions()}
+    workspace = cfg.workspace()
+
+    model = load_model(cfg.embedding_model())
+
+    click.echo(f"Watching {folder} for changes. Press Ctrl+C to stop.")
+
+    handler = FolioEventHandler(cfg, model, workspace, extensions)
+    observer = Observer()
+    observer.schedule(handler, str(folder), recursive=True)
+    observer.start()
+
+    try:
+        observer.join()
+    except KeyboardInterrupt:
+        observer.stop()
+        observer.join()
+        click.echo("Stopped.")
 
 
 # ── query ────────────────────────────────────────────────────────────────────
@@ -201,7 +305,6 @@ def query(config_path: str) -> None:
 
         confidence = result.get("confidence", "unknown")
 
-        # Confidence-gated warning prefix (Dimension 5).
         if confidence == "insufficient_data":
             click.echo(
                 "\nWarning: Folio did not find strong evidence in your documents. "
@@ -225,7 +328,6 @@ def query(config_path: str) -> None:
 
         click.echo(f"Confidence: {confidence}\n")
 
-        # Source excerpt preview (Dimension 5).
         if chunks:
             try:
                 show = click.prompt("Show excerpts? [y/N]", default="N", show_default=False).strip().lower()
@@ -257,7 +359,6 @@ def query(config_path: str) -> None:
 )
 def list_docs(config_path: str) -> None:
     """Print a table of all ingested documents."""
-    # Config is loaded to validate the file exists; not strictly needed for list.
     load_config(config_path)
     ensure_dirs()
     init_db()
@@ -273,7 +374,6 @@ def list_docs(config_path: str) -> None:
 
     for doc in docs:
         pages_label = str(doc.page_count) if doc.page_count is not None else "-"
-        # ISO timestamp -> date only for compact display.
         date_label = doc.ingested_at[:10]
         click.echo(
             f"{doc.filename:<40} {pages_label:>6}  {doc.chunk_count:>7}  {date_label}"
@@ -359,7 +459,6 @@ def reindex(filename: str, config_path: str) -> None:
     filepath = Path(doc.filepath)
     workspace = cfg.workspace()
 
-    # Step 1 — remove existing data.
     delete_by_doc_id(doc.id, workspace=workspace)
     delete_document(doc.id)
     click.echo(f"Removed existing index entry for '{filename}'.")
@@ -368,58 +467,17 @@ def reindex(filename: str, config_path: str) -> None:
         click.echo(f"Error: original file no longer exists at '{filepath}'.", err=True)
         sys.exit(1)
 
-    # Step 2 — re-ingest.
+    model = load_model(cfg.embedding_model())
     click.echo(f"  Re-ingesting  {filepath.name}...", nl=False)
 
-    pages = parse(filepath)
-    if not pages:
-        click.echo("  FAILED (no text)")
+    # File was already deleted above, so _ingest_single_file will take the fresh-ingest path.
+    chunk_count, status = _ingest_single_file(filepath, cfg, model, workspace)
+
+    if status == "failed":
+        click.echo("  FAILED")
         sys.exit(1)
 
-    raw_chunks = chunk_pages(pages, cfg.chunk_size(), cfg.chunk_overlap())
-    if not raw_chunks:
-        click.echo("  FAILED (no chunks)")
-        sys.exit(1)
-
-    model = load_model(cfg.embedding_model())
-    fid = doc_id(filepath)
-
-    chunk_objs: list[Chunk] = [
-        Chunk(
-            id=f"{fid}:chunk:{rc['chunk_index']}",
-            doc_id=fid,
-            filename=filepath.name,
-            page_number=rc["page_number"],
-            chunk_index=rc["chunk_index"],
-            text=rc["text"],
-            token_estimate=len(rc["text"].split()),
-        )
-        for rc in raw_chunks
-    ]
-
-    embeddings = embed_texts([c.text for c in chunk_objs], model)
-
-    page_numbers = [p["page_number"] for p in pages if p["page_number"] is not None]
-    page_count = max(page_numbers) if page_numbers else None
-
-    new_doc = Document(
-        id=fid,
-        filename=filepath.name,
-        filepath=str(filepath.resolve()),
-        extension=filepath.suffix.lower(),
-        page_count=page_count,
-        chunk_count=len(chunk_objs),
-        ingested_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-    insert_document(new_doc)
-    for chunk in chunk_objs:
-        insert_chunk(chunk)
-    update_chunk_count(fid, len(chunk_objs))
-    upsert_chunks(chunk_objs, embeddings, workspace=workspace)
-
-    click.echo(f"  OK ({len(chunk_objs)} chunks)")
-    file_ingested(str(filepath), len(chunk_objs), "reindex")
+    click.echo(f"  OK ({chunk_count} chunks)")
 
 
 if __name__ == "__main__":
