@@ -1,6 +1,7 @@
 # Runtime data — never commit
 data/
 logs/
+models/
 
 # Config with real values — keep the example, ignore the live file
 config/folio_config.yaml

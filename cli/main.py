@@ -42,6 +42,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("folio")
 
+_PARSE_REASON_LABELS: dict[str, str] = {
+    "encrypted":   "FAILED (encrypted PDF — decrypt before ingesting)",
+    "corrupted":   "FAILED (corrupted or malformed PDF)",
+    "no_text":     "FAILED (no extractable text — possibly scanned)",
+    "unsupported": "FAILED (unsupported file type)",
+    "parse_error": "FAILED (parse error — see logs)",
+}
+
 
 @click.group()
 def cli() -> None:
@@ -56,7 +64,7 @@ def _ingest_single_file(filepath: Path, cfg, model, workspace: str) -> tuple[int
 
     If the file is already indexed it is deleted first (re-index path).
     Returns (chunk_count, status) where status is one of:
-      "ingested" | "reindexed" | "failed"
+      "ingested" | "reindexed" | "failed:<reason>"
     """
     fid = doc_id(filepath)
     is_reindex = document_exists(fid)
@@ -65,16 +73,16 @@ def _ingest_single_file(filepath: Path, cfg, model, workspace: str) -> tuple[int
         delete_by_doc_id(fid, workspace=workspace)
         delete_document(fid)
 
-    pages = parse(filepath)
+    pages, parse_reason = parse(filepath)
     if not pages:
-        file_skipped(str(filepath), "no extractable text")
-        logger.warning("FAIL  %s — no extractable text", filepath.name)
-        return (0, "failed")
+        file_skipped(str(filepath), parse_reason or "no_text")
+        logger.warning("FAIL  %s — %s", filepath.name, parse_reason or "no_text")
+        return (0, f"failed:{parse_reason or 'no_text'}")
 
     raw_chunks = chunk_pages(pages, cfg.chunk_size(), cfg.chunk_overlap())
     if not raw_chunks:
         file_skipped(str(filepath), "chunking produced no output")
-        return (0, "failed")
+        return (0, "failed:no_text")
 
     chunk_objs: list[Chunk] = [
         Chunk(
@@ -135,21 +143,25 @@ class FolioEventHandler(FileSystemEventHandler):
             return
         filepath = Path(event.src_path)
         chunk_count, status = _ingest_single_file(filepath, self._cfg, self._model, self._workspace)
-        if status != "failed":
+        if not status.startswith("failed:"):
             click.echo(f"  [+] Ingested {filepath.name} ({chunk_count} chunks)")
         else:
-            click.echo(f"  [!] Failed to ingest {filepath.name}")
+            reason = status.split(":", 1)[1]
+            label = _PARSE_REASON_LABELS.get(reason, "unknown error")
+            click.echo(f"  [!] {filepath.name} — {label}")
 
     def on_modified(self, event) -> None:
         if event.is_directory or not self._matches(event.src_path):
             return
         filepath = Path(event.src_path)
         chunk_count, status = _ingest_single_file(filepath, self._cfg, self._model, self._workspace)
-        if status != "failed":
-            label = "Reindexed" if status == "reindexed" else "Ingested"
-            click.echo(f"  [+] {label} {filepath.name} ({chunk_count} chunks)")
+        if not status.startswith("failed:"):
+            verb = "Reindexed" if status == "reindexed" else "Ingested"
+            click.echo(f"  [+] {verb} {filepath.name} ({chunk_count} chunks)")
         else:
-            click.echo(f"  [!] Failed to ingest {filepath.name}")
+            reason = status.split(":", 1)[1]
+            label = _PARSE_REASON_LABELS.get(reason, "unknown error")
+            click.echo(f"  [!] {filepath.name} — {label}")
 
     def on_deleted(self, event) -> None:
         if event.is_directory or not self._matches(event.src_path):
@@ -210,9 +222,11 @@ def ingest(config_path: str) -> None:
 
         chunk_count, status = _ingest_single_file(filepath, cfg, model, workspace)
 
-        if status == "failed":
+        if status.startswith("failed:"):
+            reason = status.split(":", 1)[1]
+            label = _PARSE_REASON_LABELS.get(reason, "FAILED (unknown error)")
             failed_count += 1
-            click.echo("  FAILED")
+            click.echo(f"  {label}")
             continue
 
         total_chunks += chunk_count
@@ -473,8 +487,10 @@ def reindex(filename: str, config_path: str) -> None:
     # File was already deleted above, so _ingest_single_file will take the fresh-ingest path.
     chunk_count, status = _ingest_single_file(filepath, cfg, model, workspace)
 
-    if status == "failed":
-        click.echo("  FAILED")
+    if status.startswith("failed:"):
+        reason = status.split(":", 1)[1]
+        label = _PARSE_REASON_LABELS.get(reason, "FAILED (unknown error)")
+        click.echo(f"  {label}")
         sys.exit(1)
 
     click.echo(f"  OK ({chunk_count} chunks)")
