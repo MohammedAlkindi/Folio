@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -21,3 +21,4 @@ class Chunk:
     chunk_index: int
     text: str
     token_estimate: int  # len(text.split()) — word count as proxy for tokens
+    preview: str = field(default="")  # first 200 chars, stored in SQLite for auditing

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     page_number    INTEGER,
     chunk_index    INTEGER NOT NULL,
     token_estimate INTEGER,
+    preview        TEXT,
     ingested_at    TEXT NOT NULL
 );
 """
@@ -77,6 +78,11 @@ def init_db() -> None:
     with _conn() as con:
         con.execute(_CREATE_DOCUMENTS)
         con.execute(_CREATE_CHUNKS)
+        # Migration: add preview column to existing databases that predate this field.
+        try:
+            con.execute("ALTER TABLE chunks ADD COLUMN preview TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
     logger.debug("SQLite schema initialised at %s", DB_PATH)
 
 
@@ -122,12 +128,13 @@ def update_chunk_count(doc_id: str, chunk_count: int) -> None:
 
 def insert_chunk(chunk: Chunk) -> None:
     now = datetime.now(timezone.utc).isoformat()
+    preview = chunk.text[:200] if chunk.text else ""
     with _conn() as con:
         con.execute(
             """
             INSERT OR IGNORE INTO chunks
-                (id, doc_id, filename, page_number, chunk_index, token_estimate, ingested_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, doc_id, filename, page_number, chunk_index, token_estimate, preview, ingested_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 chunk.id,
@@ -136,6 +143,7 @@ def insert_chunk(chunk: Chunk) -> None:
                 chunk.page_number,
                 chunk.chunk_index,
                 chunk.token_estimate,
+                preview,
                 now,
             ),
         )
@@ -171,14 +179,11 @@ def list_documents() -> list[Document]:
 
 
 def get_chunks_for_doc(doc_id: str) -> list[Chunk]:
-    # text is not stored in SQLite — only metadata. Full text lives in ChromaDB.
-    # Assumption: callers needing text go through the vector store.
     with _conn() as con:
         rows = con.execute(
             "SELECT * FROM chunks WHERE doc_id = ? ORDER BY chunk_index",
             (doc_id,),
         ).fetchall()
-    # Reconstruct Chunk without text field (text is stored in ChromaDB only).
     result = []
     for r in rows:
         d = dict(r)
@@ -189,8 +194,9 @@ def get_chunks_for_doc(doc_id: str) -> list[Chunk]:
                 filename=d["filename"],
                 page_number=d["page_number"],
                 chunk_index=d["chunk_index"],
-                text="",  # not persisted in SQLite — intentional
+                text="",  # full text lives in ChromaDB only
                 token_estimate=d["token_estimate"],
+                preview=d.get("preview") or "",
             )
         )
     return result

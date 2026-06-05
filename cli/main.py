@@ -25,6 +25,7 @@ from retrieval.retriever import retrieve
 from store.db import (
     delete_document,
     document_exists,
+    get_chunks_for_doc,
     get_document_by_filename,
     init_db,
     insert_chunk,
@@ -371,7 +372,8 @@ def query(config_path: str) -> None:
     show_default=True,
     help="Path to YAML config file.",
 )
-def list_docs(config_path: str) -> None:
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show chunk previews.")
+def list_docs(config_path: str, verbose: bool) -> None:
     """Print a table of all ingested documents."""
     load_config(config_path)
     ensure_dirs()
@@ -386,12 +388,23 @@ def list_docs(config_path: str) -> None:
     click.echo(header)
     click.echo("-" * len(header))
 
+    _PREVIEW_LIMIT = 5
+
     for doc in docs:
         pages_label = str(doc.page_count) if doc.page_count is not None else "-"
         date_label = doc.ingested_at[:10]
         click.echo(
             f"{doc.filename:<40} {pages_label:>6}  {doc.chunk_count:>7}  {date_label}"
         )
+        if verbose:
+            chunks = get_chunks_for_doc(doc.id)
+            for chunk in chunks[:_PREVIEW_LIMIT]:
+                page_label = str(chunk.page_number) if chunk.page_number is not None else "-"
+                preview = chunk.preview or "(no preview)"
+                click.echo(f"    [{chunk.chunk_index}] p.{page_label}: {preview}")
+            remainder = len(chunks) - _PREVIEW_LIMIT
+            if remainder > 0:
+                click.echo(f"    ... and {remainder} more chunk{'s' if remainder > 1 else ''}")
 
 
 # ── workspace ────────────────────────────────────────────────────────────────
