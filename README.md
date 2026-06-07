@@ -78,7 +78,7 @@ stretch target for Q4 based on current pipeline visibility...
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourname/folio.git && cd folio
+git clone https://github.com/MohammedAlkindi/Folio.git && cd Folio
 
 # 2. Virtual environment
 python -m venv .venv
