@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+DEFAULT_QA_MODEL = "claude-sonnet-4-6"
+
 
 class Config:
     def __init__(self, data: dict[str, Any]) -> None:
@@ -44,7 +46,7 @@ class Config:
         return str(self._data["qa"].get("provider", "anthropic"))
 
     def qa_model(self) -> str:
-        return self._data["qa"].get("model", "claude-sonnet-4-6")
+        return self._data["qa"].get("model", DEFAULT_QA_MODEL)
 
     def qa_api_key(self) -> str:
         env_var = self._data["qa"].get("api_key_env", "ANTHROPIC_API_KEY")

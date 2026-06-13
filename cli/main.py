@@ -7,7 +7,7 @@ import click
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from core.config import Config, load_config
+from core.config import DEFAULT_QA_MODEL, Config, load_config
 from core.manifest import (
     file_ingested,
     file_skipped,
@@ -334,7 +334,7 @@ _DEMO_CONFIG_BASE: dict = {
     "embedding": {"provider": "sentence_transformers", "model": "all-MiniLM-L6-v2"},
     "retrieval": {"top_k": 6},
     "qa": {
-        "model": "claude-sonnet-4-6",
+        "model": DEFAULT_QA_MODEL,
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 2048,
         "context_budget": 3500,

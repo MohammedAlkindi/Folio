@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from core.config import load_config
+from core.config import Config, load_config
 from core.paths import ROOT, ensure_dirs
 from ingestion.chunker import chunk_pages
 from ingestion.embedder import embed_texts, load_model
@@ -147,6 +147,8 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
+    use_hybrid = st.checkbox("Hybrid search (BM25 + semantic)", value=cfg.retrieval_hybrid())
+    st.divider()
     st.metric("Documents", len(list_documents()))
 
 # ── Query ─────────────────────────────────────────────────────────────────────
@@ -185,7 +187,11 @@ if page == "💬 Query":
 
             with st.chat_message("assistant"):
                 with st.spinner("Retrieving…"):
-                    chunks = retrieve(question, cfg)
+                    _retrieval_cfg = Config({
+                        **cfg._data,
+                        "retrieval": {**cfg._data.get("retrieval", {}), "hybrid": use_hybrid},
+                    })
+                    chunks = retrieve(question, _retrieval_cfg)
 
                 if not chunks:
                     reply = "No relevant content found for that question."
