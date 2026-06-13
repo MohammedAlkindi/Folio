@@ -120,14 +120,18 @@ folio ingest --config config/folio_config.yaml
 
 | Command | What it does |
 |---------|-------------|
+| `folio demo` | Ingest the built-in sample PDF and start Q&A — no config needed. |
+| `folio demo --reset` | Clear the demo index and re-ingest from scratch. |
 | `folio ingest` | Scan folder, chunk, embed, store. Idempotent. |
 | `folio query` | Interactive Q&A loop with citations. |
 | `folio list` | Print a table of all indexed documents. |
+| `folio list --verbose` | Include chunk previews per document. |
 | `folio remove <filename>` | Delete a document from SQLite and ChromaDB. |
 | `folio reindex <filename>` | Remove and re-ingest a document in one step. |
+| `folio watch` | Live folder ingestion — auto-ingest files on change. |
 | `folio workspace list` | List all workspaces with chunk counts. |
 
-All commands accept `--config <path>` (default: `config/folio_config.yaml`).
+All commands except `folio demo` accept `--config <path>` (default: `config/folio_config.yaml`).
 
 ---
 
