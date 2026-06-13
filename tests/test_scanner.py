@@ -41,3 +41,33 @@ def test_doc_id_different_paths():
 def test_missing_folder():
     results = scan_folder("/nonexistent/path/that/does/not/exist", [".txt"])
     assert results == []
+
+
+def test_doc_id_unique_across_paths_same_content(tmp_path: Path):
+    """doc_id incorporates the filepath, so two files with identical content produce different IDs."""
+    data = b"identical file content for testing"
+    path_a = tmp_path / "file_a.txt"
+    path_b = tmp_path / "file_b.txt"
+    path_a.write_bytes(data)
+    path_b.write_bytes(data)
+    # Assumption: doc_id = SHA256(content + "\x00" + abs_path) ensures per-file uniqueness.
+    assert doc_id(path_a) != doc_id(path_b)
+
+
+def test_content_hash_detects_change(tmp_path: Path):
+    """content_hash changes when file content changes, enabling automatic reindex detection."""
+    from ingestion.scanner import content_hash
+    f = tmp_path / "file.txt"
+    f.write_bytes(b"version one")
+    h1 = content_hash(f)
+    f.write_bytes(b"version two")
+    h2 = content_hash(f)
+    assert h1 != h2
+
+
+def test_content_hash_stable(tmp_path: Path):
+    """content_hash is deterministic for unchanged content."""
+    from ingestion.scanner import content_hash
+    f = tmp_path / "stable.txt"
+    f.write_bytes(b"stable content")
+    assert content_hash(f) == content_hash(f)

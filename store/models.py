@@ -3,13 +3,14 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Document:
-    id: str          # sha256 of absolute path string
+    id: str          # SHA-256 of (content_bytes + "\x00" + abs_path)
     filename: str
     filepath: str
     extension: str
     page_count: int | None
     chunk_count: int
     ingested_at: str  # ISO 8601
+    content_hash: str | None = None  # SHA-256 of content bytes only; used for change detection
 
 
 @dataclass

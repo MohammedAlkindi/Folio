@@ -35,7 +35,13 @@ class Config:
     def retrieval_top_k(self) -> int:
         return int(self._data["retrieval"].get("top_k", 6))
 
+    def retrieval_hybrid(self) -> bool:
+        return bool(self._data["retrieval"].get("hybrid", True))
+
     # ── qa ───────────────────────────────────────────────────────────────────
+
+    def qa_provider(self) -> str:
+        return str(self._data["qa"].get("provider", "anthropic"))
 
     def qa_model(self) -> str:
         return self._data["qa"].get("model", "claude-sonnet-4-6")
@@ -51,6 +57,12 @@ class Config:
 
     def qa_context_budget(self) -> int:
         return int(self._data["qa"].get("context_budget", 3500))
+
+    def qa_ollama_model(self) -> str:
+        return str(self._data["qa"].get("ollama_model", "llama3"))
+
+    def qa_ollama_host(self) -> str:
+        return str(self._data["qa"].get("ollama_host", "http://localhost:11434"))
 
     # ── workspace ────────────────────────────────────────────────────────────
 

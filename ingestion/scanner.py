@@ -37,6 +37,24 @@ def scan_folder(folder: str, extensions: list[str]) -> list[Path]:
     return found
 
 
+def content_hash(filepath: Path) -> str:
+    """SHA-256 of file content bytes only — used to detect when a file has been modified."""
+    return hashlib.sha256(filepath.resolve().read_bytes()).hexdigest()
+
+
 def doc_id(filepath: Path) -> str:
-    """Stable SHA-256 of the absolute path string — same file = same ID every run."""
+    """
+    SHA-256 of file content bytes combined with the absolute path.
+    Changes when the file is modified. Unique per file even when two files share
+    identical content (filepath is the tiebreaker).
+    # Assumption: content + path combined hash satisfies both change-detection
+    # and per-file uniqueness requirements.
+    """
+    resolved = filepath.resolve()
+    data = resolved.read_bytes() + b"\x00" + str(resolved).encode()
+    return hashlib.sha256(data).hexdigest()
+
+
+def path_hash(filepath: Path) -> str:
+    """SHA-256 of the absolute path string — legacy behaviour from before content hashing. Migration use only."""
     return hashlib.sha256(str(filepath.resolve()).encode()).hexdigest()

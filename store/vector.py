@@ -90,6 +90,29 @@ def query(
     return output
 
 
+def get_all_chunks(workspace: str = "default") -> list[dict]:
+    """Return all chunks in a workspace as {text, filename, page_number, chunk_index} dicts."""
+    collection = get_collection(f"folio_{workspace}")
+    count = collection.count()
+    if count == 0:
+        return []
+    results = collection.get(include=["documents", "metadatas"])
+    output: list[dict] = []
+    docs: list[str] = results.get("documents") or []
+    metas: list[dict] = results.get("metadatas") or []
+    for text, meta in zip(docs, metas):
+        page = meta.get("page_number", 0)
+        output.append(
+            {
+                "text": text,
+                "filename": meta.get("filename", ""),
+                "page_number": page if page != 0 else None,
+                "chunk_index": meta.get("chunk_index", 0),
+            }
+        )
+    return output
+
+
 def delete_by_doc_id(doc_id: str, workspace: str = "default") -> None:
     collection = get_collection(f"folio_{workspace}")
     collection.delete(where={"doc_id": doc_id})

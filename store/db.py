@@ -11,13 +11,14 @@ logger = logging.getLogger(__name__)
 
 _CREATE_DOCUMENTS = """
 CREATE TABLE IF NOT EXISTS documents (
-    id          TEXT PRIMARY KEY,
-    filename    TEXT NOT NULL,
-    filepath    TEXT NOT NULL,
-    extension   TEXT NOT NULL,
-    page_count  INTEGER,
-    chunk_count INTEGER DEFAULT 0,
-    ingested_at TEXT NOT NULL
+    id           TEXT PRIMARY KEY,
+    filename     TEXT NOT NULL,
+    filepath     TEXT NOT NULL,
+    extension    TEXT NOT NULL,
+    page_count   INTEGER,
+    chunk_count  INTEGER DEFAULT 0,
+    ingested_at  TEXT NOT NULL,
+    content_hash TEXT
 );
 """
 
@@ -52,28 +53,6 @@ def _conn() -> Generator[sqlite3.Connection, None, None]:
         con.close()
 
 
-def _conn_at(db_path) -> Generator[sqlite3.Connection, None, None]:
-    """Context manager for a connection to an arbitrary path — used by tests."""
-    import sqlite3 as _sqlite3
-    from contextlib import contextmanager as _cm
-
-    @_cm
-    def _inner():
-        con = _sqlite3.connect(str(db_path), check_same_thread=False)
-        con.execute("PRAGMA journal_mode=WAL;")
-        con.row_factory = _sqlite3.Row
-        try:
-            yield con
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
-        finally:
-            con.close()
-
-    return _inner()
-
-
 def init_db() -> None:
     with _conn() as con:
         con.execute(_CREATE_DOCUMENTS)
@@ -81,6 +60,11 @@ def init_db() -> None:
         # Migration: add preview column to existing databases that predate this field.
         try:
             con.execute("ALTER TABLE chunks ADD COLUMN preview TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        # Migration: add content_hash column for content-based change detection.
+        try:
+            con.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
     logger.debug("SQLite schema initialised at %s", DB_PATH)
@@ -102,8 +86,8 @@ def insert_document(doc: Document) -> bool:
         con.execute(
             """
             INSERT OR IGNORE INTO documents
-                (id, filename, filepath, extension, page_count, chunk_count, ingested_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, filename, filepath, extension, page_count, chunk_count, ingested_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 doc.id,
@@ -113,6 +97,7 @@ def insert_document(doc: Document) -> bool:
                 doc.page_count,
                 doc.chunk_count,
                 doc.ingested_at,
+                doc.content_hash,
             ),
         )
     return True
@@ -164,6 +149,17 @@ def get_document_by_filename(filename: str) -> Document | None:
     with _conn() as con:
         row = con.execute(
             "SELECT * FROM documents WHERE filename = ? LIMIT 1", (filename,)
+        ).fetchone()
+    if row is None:
+        return None
+    return Document(**dict(row))
+
+
+def get_document_by_filepath(filepath: str) -> Document | None:
+    """Look up the document stored at the given absolute filepath."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM documents WHERE filepath = ? LIMIT 1", (filepath,)
         ).fetchone()
     if row is None:
         return None

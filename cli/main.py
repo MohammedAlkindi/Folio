@@ -19,7 +19,7 @@ from core.paths import ensure_dirs
 from ingestion.chunker import chunk_pages
 from ingestion.embedder import embed_texts, load_model
 from ingestion.parser import parse
-from ingestion.scanner import doc_id, scan_folder
+from ingestion.scanner import content_hash, doc_id, scan_folder
 from qa.answerer import answer
 from retrieval.retriever import retrieve
 from store.db import (
@@ -27,6 +27,7 @@ from store.db import (
     document_exists,
     get_chunks_for_doc,
     get_document_by_filename,
+    get_document_by_filepath,
     init_db,
     insert_chunk,
     insert_document,
@@ -63,7 +64,7 @@ def _ingest_single_file(filepath: Path, cfg, model, workspace: str) -> tuple[int
     """
     Run the full ingest pipeline for one file.
 
-    If the file is already indexed it is deleted first (re-index path).
+    If the file is already indexed (same doc_id) it is deleted first (re-index path).
     Returns (chunk_count, status) where status is one of:
       "ingested" | "reindexed" | "failed:<reason>"
     """
@@ -111,6 +112,7 @@ def _ingest_single_file(filepath: Path, cfg, model, workspace: str) -> tuple[int
         page_count=page_count,
         chunk_count=len(chunk_objs),
         ingested_at=datetime.now(timezone.utc).isoformat(),
+        content_hash=content_hash(filepath),
     )
 
     insert_document(doc)
@@ -155,10 +157,20 @@ class FolioEventHandler(FileSystemEventHandler):
         if event.is_directory or not self._matches(event.src_path):
             return
         filepath = Path(event.src_path)
+
+        # Skip if file content has not changed since last ingest.
+        new_ch = content_hash(filepath)
+        existing = get_document_by_filepath(str(filepath.resolve()))
+        if existing is not None and existing.content_hash == new_ch:
+            return
+
+        if existing is not None:
+            delete_by_doc_id(existing.id, workspace=self._workspace)
+            delete_document(existing.id)
+
         chunk_count, status = _ingest_single_file(filepath, self._cfg, self._model, self._workspace)
         if not status.startswith("failed:"):
-            verb = "Reindexed" if status == "reindexed" else "Ingested"
-            click.echo(f"  [+] {verb} {filepath.name} ({chunk_count} chunks)")
+            click.echo(f"  [~] Auto-reindexed {filepath.name} (content changed) ({chunk_count} chunks)")
         else:
             reason = status.split(":", 1)[1]
             label = _PARSE_REASON_LABELS.get(reason, "unknown error")
@@ -168,11 +180,12 @@ class FolioEventHandler(FileSystemEventHandler):
         if event.is_directory or not self._matches(event.src_path):
             return
         filepath = Path(event.src_path)
-        fid = doc_id(filepath)
-        if not document_exists(fid):
+        # Use filepath lookup so we don't need to read the (already deleted) file for its hash.
+        existing = get_document_by_filepath(str(filepath.resolve()))
+        if existing is None:
             return
-        delete_by_doc_id(fid, workspace=self._workspace)
-        delete_document(fid)
+        delete_by_doc_id(existing.id, workspace=self._workspace)
+        delete_document(existing.id)
         click.echo(f"  [-] Removed {filepath.name}")
 
 
@@ -211,12 +224,31 @@ def ingest(config_path: str) -> None:
     total_chunks = 0
 
     for filepath in files:
-        fid = doc_id(filepath)
+        new_ch = content_hash(filepath)
+        existing = get_document_by_filepath(str(filepath.resolve()))
 
-        if document_exists(fid):
-            skipped_count += 1
-            file_skipped(str(filepath), "already indexed")
-            logger.info("SKIP  %s (already indexed)", filepath.name)
+        if existing is not None:
+            if existing.content_hash is not None and existing.content_hash == new_ch:
+                skipped_count += 1
+                file_skipped(str(filepath), "already indexed")
+                logger.info("SKIP  %s (already indexed)", filepath.name)
+                continue
+
+            # Content changed (or legacy entry without content_hash) — auto-reindex.
+            delete_by_doc_id(existing.id, workspace=workspace)
+            delete_document(existing.id)
+            chunk_count, status = _ingest_single_file(filepath, cfg, model, workspace)
+            if status.startswith("failed:"):
+                reason = status.split(":", 1)[1]
+                label = _PARSE_REASON_LABELS.get(reason, "FAILED (unknown error)")
+                failed_count += 1
+                click.echo(f"  {label}")
+            else:
+                total_chunks += chunk_count
+                new_count += 1
+                click.echo(
+                    f"  [~] Auto-reindexed {filepath.name} (content changed) ({chunk_count} chunks)"
+                )
             continue
 
         click.echo(f"  Ingesting  {filepath.name}...", nl=False)

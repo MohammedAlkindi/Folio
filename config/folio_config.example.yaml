@@ -12,9 +12,19 @@ embedding:
 
 retrieval:
   top_k: 6                          # number of chunks returned per query
+  hybrid: true                      # fuse BM25 keyword results with semantic results (recommended)
 
 qa:
+  provider: "anthropic"             # "anthropic" (default) or "ollama" for air-gapped operation
   model: "claude-sonnet-4-6"
   api_key_env: "ANTHROPIC_API_KEY"  # name of the env var holding your Anthropic key
   max_tokens: 2048
   context_budget: 3500              # max words sent as context; lowest-ranked chunks dropped first
+
+  # ── Ollama (air-gapped / local LLM) ────────────────────────────────────────
+  # To switch to Ollama, set provider: "ollama" above and install the package:
+  #   pip install "folio[ollama]"   (or: pip install ollama)
+  # Then start Ollama: ollama serve  &&  ollama pull llama3
+  #
+  # ollama_model: "llama3"
+  # ollama_host: "http://localhost:11434"
