@@ -24,7 +24,9 @@ from store.db import (
 from store.models import Chunk, Document
 from store.vector import delete_by_doc_id, upsert_chunks
 
-CONFIG_PATH = ROOT / "config" / "folio_config.yaml"
+_config_yaml = ROOT / "config" / "folio_config.yaml"
+_config_example = ROOT / "config" / "folio_config.example.yaml"
+CONFIG_PATH = _config_yaml if _config_yaml.exists() else _config_example
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
