@@ -7,7 +7,7 @@ import click
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from core.config import load_config
+from core.config import Config, load_config
 from core.manifest import (
     file_ingested,
     file_skipped,
@@ -280,6 +280,184 @@ def watch(config_path: str) -> None:
         observer.stop()
         observer.join()
         click.echo("Stopped.")
+
+
+# ── demo ─────────────────────────────────────────────────────────────────────
+
+_DEMO_QUESTIONS = [
+    "What revenue targets were approved?",
+    "Who attended the board meeting?",
+    "What was the Q4 hiring plan?",
+    "What risks were flagged by the CFO?",
+]
+
+_DEMO_CONFIG_BASE: dict = {
+    "workspace": "demo",
+    "ingestion": {
+        "folder": "",  # filled at runtime
+        "supported_extensions": [".pdf", ".txt", ".md"],
+        "chunk_size": 800,
+        "chunk_overlap": 150,
+    },
+    "embedding": {"provider": "sentence_transformers", "model": "all-MiniLM-L6-v2"},
+    "retrieval": {"top_k": 6},
+    "qa": {
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 2048,
+        "context_budget": 3500,
+    },
+}
+
+_DEMO_PDF = "board_minutes_q3_2024.pdf"
+
+
+@cli.command()
+@click.option("--reset", is_flag=True, default=False, help="Clear the demo index and re-ingest from scratch.")
+def demo(reset: bool) -> None:
+    """Ingest the built-in sample PDF and start an interactive Q&A session.
+
+    Requires ANTHROPIC_API_KEY to be set. No config file needed.
+    Re-run with --reset to clear the demo index and start fresh.
+    """
+    # ── pre-flight checks ────────────────────────────────────────────────────
+
+    import os
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        click.echo(
+            "Error: ANTHROPIC_API_KEY is not set.\n\n"
+            "  export ANTHROPIC_API_KEY='sk-ant-...'\n\n"
+            "Folio needs this key to answer questions. Ingestion works without it,\n"
+            "but the Q&A session will fail when you ask the first question.",
+            err=True,
+        )
+        sys.exit(1)
+
+    docs_dir = Path(__file__).resolve().parent.parent / "docs"
+    sample_pdf = docs_dir / _DEMO_PDF
+
+    if not sample_pdf.exists():
+        click.echo(
+            f"Error: {_DEMO_PDF} not found in docs/.\n\n"
+            "Make sure you are running from the repo root and the file was not deleted.\n"
+            "To recreate it: see the generation script in the project history.",
+            err=True,
+        )
+        sys.exit(1)
+
+    config_data = {
+        **_DEMO_CONFIG_BASE,
+        "ingestion": {**_DEMO_CONFIG_BASE["ingestion"], "folder": str(docs_dir)},
+    }
+    cfg = Config(config_data)
+
+    ensure_dirs()
+    init_db()
+
+    # ── header ───────────────────────────────────────────────────────────────
+
+    click.echo("=" * 60)
+    click.echo("  Folio Demo — Meridian Capital Q3 2024 Board Meeting")
+    click.echo("=" * 60)
+
+    # ── ingest ───────────────────────────────────────────────────────────────
+
+    fid = doc_id(sample_pdf)
+    already_indexed = document_exists(fid)
+
+    if already_indexed and reset:
+        click.echo("  --reset: clearing demo index...")
+        delete_by_doc_id(fid, workspace=cfg.workspace())
+        delete_document(fid)
+        already_indexed = False
+
+    if already_indexed:
+        click.echo(f"  {_DEMO_PDF} already indexed  (use --reset to re-ingest)")
+    else:
+        click.echo("  Loading embedding model...", nl=False)
+        try:
+            model = load_model(cfg.embedding_model())
+        except Exception as exc:
+            click.echo(f"\nError: could not load embedding model — {exc}", err=True)
+            sys.exit(1)
+        click.echo("  OK")
+
+        click.echo(f"  Ingesting {_DEMO_PDF}...", nl=False)
+        chunk_count, status = _ingest_single_file(sample_pdf, cfg, model, cfg.workspace())
+        if status.startswith("failed:"):
+            reason = status.split(":", 1)[1]
+            click.echo(f"\n  {_PARSE_REASON_LABELS.get(reason, 'FAILED (unknown error)')}", err=True)
+            sys.exit(1)
+        click.echo(f"  OK ({chunk_count} chunks)")
+
+    # ── query loop ───────────────────────────────────────────────────────────
+
+    click.echo("")
+    click.echo("  Suggested questions:")
+    for q in _DEMO_QUESTIONS:
+        click.echo(f"    - {q}")
+    click.echo("")
+    click.echo("  Type 'quit' to exit.\n")
+
+    while True:
+        try:
+            question = click.prompt(">", prompt_suffix=" ").strip()
+        except (click.Abort, EOFError, KeyboardInterrupt):
+            click.echo("\nGoodbye.")
+            break
+
+        if not question:
+            continue
+
+        if question.lower() in {"quit", "exit", "q"}:
+            click.echo("Goodbye.")
+            break
+
+        chunks = retrieve(question, cfg)
+        if not chunks:
+            click.echo("No relevant content found. Try rephrasing your question.\n")
+            continue
+
+        try:
+            result = answer(question, chunks, cfg)
+        except Exception as exc:
+            click.echo(f"Error: Q&A request failed — {exc}\n", err=True)
+            continue
+
+        confidence = result.get("confidence", "unknown")
+
+        if confidence == "insufficient_data":
+            click.echo("\nWarning: Folio found limited evidence. The answer below may be incomplete.")
+        elif confidence == "low":
+            click.echo("\nNote: Low confidence — consider ingesting more relevant documents.")
+
+        click.echo(f"\n{result['answer']}\n")
+
+        sources = result.get("sources", [])
+        if sources:
+            parts = []
+            for s in sources:
+                page = s.get("page_number")
+                parts.append(f"{s['filename']} (p.{page})" if page else s["filename"])
+            click.echo(f"Sources: {', '.join(parts)}")
+
+        click.echo(f"Confidence: {confidence}\n")
+
+        try:
+            show = click.prompt("Show excerpts? [y/N]", default="N", show_default=False).strip().lower()
+        except (click.Abort, EOFError, KeyboardInterrupt):
+            show = "n"
+
+        if show in {"y", "yes"}:
+            click.echo("")
+            for i, chunk in enumerate(chunks, start=1):
+                page = chunk.get("page_number")
+                click.echo(f"--- [{i}] {chunk['filename']} ({'p.' + str(page) if page else 'no page'}) ---")
+                click.echo(chunk["text"])
+                click.echo("")
+
+        query_logged(question, [s.get("filename", "") for s in sources])
 
 
 # ── query ────────────────────────────────────────────────────────────────────

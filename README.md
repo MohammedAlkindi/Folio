@@ -17,6 +17,19 @@ using Claude — every claim traceable to a specific document and page number.
 
 ---
 
+## Try it now
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+pip install -e . && folio demo
+```
+
+No config file. No folder setup. Folio ingests the included sample board minutes and
+opens a Q&A session in under a minute. Re-run with `--reset` to clear the demo index
+and start fresh.
+
+---
+
 ## Quick demo
 
 ```
