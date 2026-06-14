@@ -149,6 +149,7 @@ with st.sidebar:
         "Navigation",
         ["💬 Query", "⬆ Ingest", "🗂 Documents"],
         label_visibility="collapsed",
+        key="nav",
     )
     st.divider()
     st.metric("Documents", len(list_documents()))
@@ -168,7 +169,26 @@ if page == "💬 Query":
         )
 
     if not list_documents():
-        st.info("No documents ingested yet. Go to **⬆ Ingest** to add some.")
+        st.write("")
+        _, card_col, _ = st.columns([1, 2, 1])
+        with card_col:
+            st.markdown(
+                "<div style='text-align:center; padding:3rem 2rem 1.5rem;"
+                " border:1px solid #334155; border-radius:12px;"
+                " background:#0f172a; margin-top:1rem;'>"
+                "<div style='font-size:3rem; line-height:1; margin-bottom:1rem;'>📄</div>"
+                "<h3 style='margin:0 0 0.5rem; color:#f1f5f9;'>No documents yet</h3>"
+                "<p style='color:#94a3b8; margin:0;'>Ingest a PDF, TXT, or Markdown file"
+                "<br>to start asking questions.</p>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.write("")
+            _, btn_col, _ = st.columns([1, 2, 1])
+            with btn_col:
+                if st.button("Go to Ingest →", type="primary", use_container_width=True):
+                    st.session_state.nav = "⬆ Ingest"
+                    st.rerun()
     else:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
