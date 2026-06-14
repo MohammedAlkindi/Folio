@@ -313,8 +313,10 @@ elif page == "🗂 Documents":
             c2.write(doc.extension)
             c3.write(str(doc.page_count) if doc.page_count else "—")
             c4.write(str(doc.chunk_count))
-            if c5.button("Remove", key=f"rm_{doc.id}"):
-                delete_document(doc.id)
-                delete_by_doc_id(doc.id, workspace=cfg.workspace())
-                st.rerun()
+            with c5.popover("Remove"):
+                st.markdown(f"Remove **{doc.filename}**?")
+                if st.button("Confirm", key=f"confirm_{doc.id}", type="primary"):
+                    delete_document(doc.id)
+                    delete_by_doc_id(doc.id, workspace=cfg.workspace())
+                    st.rerun()
             st.caption(doc.ingested_at[:19].replace("T", " "))
