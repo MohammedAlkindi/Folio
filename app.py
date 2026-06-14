@@ -87,6 +87,8 @@ embed_model = _get_model(cfg.embedding_model())
 
 if "messages" not in st.session_state:
     st.session_state.messages: list[dict] = []
+if "ingest_summary" not in st.session_state:
+    st.session_state.ingest_summary: dict | None = None
 
 # ── Ingest helper ─────────────────────────────────────────────────────────────
 
@@ -251,6 +253,21 @@ if page == "💬 Query":
 elif page == "⬆ Ingest":
     st.header("Ingest Documents")
 
+    if st.session_state.ingest_summary:
+        s = st.session_state.ingest_summary
+        parts = [
+            f"**{s['ingested']} ingested**",
+            f"{s['skipped']} skipped",
+            f"{s['failed']} failed",
+        ]
+        summary_line = " · ".join(parts) + f" — {s['total']} file(s) processed"
+        if s["failed"] > 0:
+            st.warning(summary_line)
+        elif s["skipped"] == s["total"]:
+            st.info(summary_line)
+        else:
+            st.success(summary_line)
+
     tab_upload, tab_folder = st.tabs(["Upload files", "Scan folder"])
 
     with tab_upload:
@@ -267,14 +284,24 @@ elif page == "⬆ Ingest":
                 docs_dir = ROOT / docs_dir
             docs_dir.mkdir(parents=True, exist_ok=True)
 
+            ingested = skipped = failed = 0
             bar = st.progress(0, text="Ingesting…")
             for i, uf in enumerate(uploaded):
                 dest = docs_dir / uf.name
                 dest.write_bytes(uf.getvalue())
                 ok, msg = _ingest(dest)
-                (st.success if ok else st.warning)(msg)
+                if ok:
+                    ingested += 1
+                elif "skipped" in msg:
+                    skipped += 1
+                else:
+                    failed += 1
                 bar.progress((i + 1) / len(uploaded))
             bar.empty()
+            st.session_state.ingest_summary = {
+                "ingested": ingested, "skipped": skipped,
+                "failed": failed, "total": len(uploaded),
+            }
             st.rerun()
 
     with tab_folder:
@@ -292,12 +319,22 @@ elif page == "⬆ Ingest":
                 if not files:
                     st.info("No supported files found in that folder.")
                 else:
+                    ingested = skipped = failed = 0
                     bar = st.progress(0, text=f"Found {len(files)} file(s)…")
                     for i, fp in enumerate(files):
                         ok, msg = _ingest(fp)
-                        (st.success if ok else st.warning)(msg)
+                        if ok:
+                            ingested += 1
+                        elif "skipped" in msg:
+                            skipped += 1
+                        else:
+                            failed += 1
                         bar.progress((i + 1) / len(files))
                     bar.empty()
+                    st.session_state.ingest_summary = {
+                        "ingested": ingested, "skipped": skipped,
+                        "failed": failed, "total": len(files),
+                    }
                     st.rerun()
 
 # ── Documents ─────────────────────────────────────────────────────────────────
