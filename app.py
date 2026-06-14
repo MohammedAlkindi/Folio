@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from core.config import Config, load_config
@@ -369,21 +370,37 @@ elif page == "🗂 Documents":
     if not docs:
         st.info("No documents ingested yet. Go to **⬆ Ingest** to add some.")
     else:
-        hcols = st.columns([4, 1, 1, 1, 2, 1])
-        for col, label in zip(hcols, ["Name", "Type", "Pages", "Chunks", "Ingested", ""]):
-            col.markdown(f"**{label}**")
-        st.divider()
+        df = pd.DataFrame([
+            {
+                "Name": doc.filename,
+                "Type": doc.extension,
+                "Pages": doc.page_count,
+                "Chunks": doc.chunk_count,
+                "Ingested": doc.ingested_at[:19].replace("T", " "),
+            }
+            for doc in docs
+        ])
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Pages": st.column_config.NumberColumn(format="%d"),
+                "Chunks": st.column_config.NumberColumn(format="%d"),
+            },
+        )
 
-        for doc in docs:
-            c1, c2, c3, c4, c5, c6 = st.columns([4, 1, 1, 1, 2, 1])
-            c1.write(doc.filename)
-            c2.write(doc.extension)
-            c3.write(str(doc.page_count) if doc.page_count else "—")
-            c4.write(str(doc.chunk_count))
-            c5.caption(doc.ingested_at[:19].replace("T", " "))
-            with c6.popover("Remove"):
-                st.markdown(f"Remove **{doc.filename}**?")
-                if st.button("Confirm", key=f"confirm_{doc.id}", type="primary"):
-                    delete_document(doc.id)
-                    delete_by_doc_id(doc.id, workspace=cfg.workspace())
-                    st.rerun()
+        st.divider()
+        sel_col, btn_col = st.columns([5, 1])
+        selected = sel_col.selectbox(
+            "Remove a document",
+            [doc.filename for doc in docs],
+            label_visibility="collapsed",
+        )
+        with btn_col.popover("Remove", use_container_width=True):
+            st.markdown(f"Remove **{selected}**?")
+            if st.button("Confirm", key="confirm_remove", type="primary"):
+                doc = next(d for d in docs if d.filename == selected)
+                delete_document(doc.id)
+                delete_by_doc_id(doc.id, workspace=cfg.workspace())
+                st.rerun()
