@@ -149,14 +149,21 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
-    use_hybrid = st.checkbox("Hybrid search (BM25 + semantic)", value=cfg.retrieval_hybrid())
-    st.divider()
     st.metric("Documents", len(list_documents()))
 
 # ── Query ─────────────────────────────────────────────────────────────────────
 
 if page == "💬 Query":
-    st.header("Ask your documents")
+    col_hdr, col_toggle = st.columns([5, 2])
+    with col_hdr:
+        st.header("Ask your documents")
+    with col_toggle:
+        st.write("")  # vertical alignment spacer
+        use_hybrid = st.toggle(
+            "Hybrid search",
+            value=cfg.retrieval_hybrid(),
+            help="Combines BM25 keyword search with semantic search for better recall.",
+        )
 
     if not list_documents():
         st.info("No documents ingested yet. Go to **⬆ Ingest** to add some.")
@@ -302,21 +309,21 @@ elif page == "🗂 Documents":
     if not docs:
         st.info("No documents ingested yet. Go to **⬆ Ingest** to add some.")
     else:
-        hcols = st.columns([4, 1, 1, 1, 1])
-        for col, label in zip(hcols, ["Name", "Type", "Pages", "Chunks", ""]):
+        hcols = st.columns([4, 1, 1, 1, 2, 1])
+        for col, label in zip(hcols, ["Name", "Type", "Pages", "Chunks", "Ingested", ""]):
             col.markdown(f"**{label}**")
         st.divider()
 
         for doc in docs:
-            c1, c2, c3, c4, c5 = st.columns([4, 1, 1, 1, 1])
+            c1, c2, c3, c4, c5, c6 = st.columns([4, 1, 1, 1, 2, 1])
             c1.write(doc.filename)
             c2.write(doc.extension)
             c3.write(str(doc.page_count) if doc.page_count else "—")
             c4.write(str(doc.chunk_count))
-            with c5.popover("Remove"):
+            c5.caption(doc.ingested_at[:19].replace("T", " "))
+            with c6.popover("Remove"):
                 st.markdown(f"Remove **{doc.filename}**?")
                 if st.button("Confirm", key=f"confirm_{doc.id}", type="primary"):
                     delete_document(doc.id)
                     delete_by_doc_id(doc.id, workspace=cfg.workspace())
                     st.rerun()
-            st.caption(doc.ingested_at[:19].replace("T", " "))
