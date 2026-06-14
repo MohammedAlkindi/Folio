@@ -153,6 +153,9 @@ with st.sidebar:
     )
     st.divider()
     st.metric("Documents", len(list_documents()))
+    if st.button("View all →", key="nav_docs", use_container_width=True):
+        st.session_state.nav = "🗂 Documents"
+        st.rerun()
 
 # ── Query ─────────────────────────────────────────────────────────────────────
 
